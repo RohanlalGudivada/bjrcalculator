@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Calculator, Download, Share2, Calendar, DollarSign, Percent, FileText, Send, Copy, Mail, Image, Smartphone, Monitor, Tablet, Clock, TrendingUp, Info } from 'lucide-react';
+import {
+  Calculator, Download, Share2, Calendar, DollarSign, Percent, FileText,
+  Send, Copy, Mail, Image as ImageIcon, Smartphone, Monitor, Tablet, Clock,
+  TrendingUp, Info
+} from 'lucide-react';
 import { format, parse, isValid } from 'date-fns';
 
-const InterestCalculator = () => {
+const InterestCalculator: React.FC = () => {
   const [principal, setPrincipal] = useState('');
   const [rate, setRate] = useState('2');
   const [customRate, setCustomRate] = useState('');
@@ -12,46 +16,54 @@ const InterestCalculator = () => {
   const [interest, setInterest] = useState<string | null>(null);
   const [finalAmount, setFinalAmount] = useState<string | null>(null);
   const [timePeriod, setTimePeriod] = useState('');
-  const [interestType, setInterestType] = useState('simple');
+  const [interestType, setInterestType] = useState<'simple' | 'compound'>('simple');
   const [steps, setSteps] = useState<string[]>([]);
   const [isCalculating, setIsCalculating] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  // Accept multiple manual formats AND native date input value
   const parseDate = (dateString: string): Date | null => {
     if (!dateString) return null;
 
     const formats = [
-      'yyyy-MM-dd',
+      'yyyy-MM-dd', // native input
       'dd-MM-yyyy',
       'dd/MM/yyyy',
       'dd.MM.yyyy',
       'dd-MM-yy',
-      'dd/MM/yy'
+      'dd/MM/yy',
     ];
 
-    for (const formatString of formats) {
+    for (const fmt of formats) {
       try {
-        const parsed = parse(dateString, formatString, new Date());
-        if (isValid(parsed)) {
-          return parsed;
-        }
-      } catch (e) {
-        continue;
+        const d = parse(dateString, fmt, new Date());
+        if (isValid(d)) return d;
+      } catch {
+        // keep trying
       }
     }
-
-    const isoDate = new Date(dateString);
-    if (isValid(isoDate)) {
-      return isoDate;
-    }
-
-    return null;
+    // Fallback (ISO, etc.)
+    const iso = new Date(dateString);
+    return isValid(iso) ? iso : null;
   };
 
   const calculateInterest = useCallback(() => {
+    setError(null);
+
     if (!principal || !startDate) {
+      setInterest(null);
+      setFinalAmount(null);
+      setTimePeriod('');
+      setSteps([]);
+      return;
+    }
+
+    const effectivePrincipal = parseFloat(principal);
+    if (!Number.isFinite(effectivePrincipal) || effectivePrincipal <= 0) {
+      setError('Please enter a valid principal greater than 0.');
       setInterest(null);
       setFinalAmount(null);
       setTimePeriod('');
@@ -63,12 +75,33 @@ const InterestCalculator = () => {
     const end = parseDate(endDate);
 
     if (!start || !end) {
+      setError('Please enter valid start and end dates (e.g., 31-10-2025 or 31/10/2025).');
       setInterest(null);
       setFinalAmount(null);
       setTimePeriod('');
       setSteps([]);
       return;
     }
+
+    if (end < start) {
+      setError('End date must be on or after the start date.');
+      setInterest(null);
+      setFinalAmount(null);
+      setTimePeriod('');
+      setSteps([]);
+      return;
+    }
+
+    const monthlyRateRaw = rate === 'custom' ? parseFloat(customRate) : parseFloat(rate);
+    if (!Number.isFinite(monthlyRateRaw) || monthlyRateRaw <= 0) {
+      setError('Please enter a valid monthly interest rate.');
+      setInterest(null);
+      setFinalAmount(null);
+      setTimePeriod('');
+      setSteps([]);
+      return;
+    }
+    const monthlyRate = monthlyRateRaw / 100;
 
     setIsCalculating(true);
 
@@ -88,15 +121,11 @@ const InterestCalculator = () => {
     }
 
     const totalMonths = years * 12 + months;
-    const totalDays = Math.floor((end.getTime() - start.getTime()) / (1000 * 3600 * 24));
-
+    const totalDays = Math.floor((end.getTime() - start.getTime()) / (1000 * 3600 * 24)); // kept for reference
     setTimePeriod(`${years} years, ${months} months, ${days} days`);
 
-    const effectivePrincipal = parseFloat(principal);
-    const monthlyRate = rate === 'custom' ? parseFloat(customRate) / 100 : parseFloat(rate) / 100;
-
     let calculatedInterest = 0;
-    let newSteps: string[] = [];
+    const newSteps: string[] = [];
 
     newSteps.push(`📊 Principal Amount: ₹${effectivePrincipal.toLocaleString()}`);
     newSteps.push(`📈 Monthly Interest Rate: ${monthlyRate * 100}%`);
@@ -104,26 +133,30 @@ const InterestCalculator = () => {
     newSteps.push(`⏰ Time Period: ${years} years, ${months} months, ${days} days`);
     newSteps.push(`📅 From: ${format(start, 'dd MMM yyyy')} to ${format(end, 'dd MMM yyyy')}`);
 
+    const noticeNum = parseFloat(noticeCharge);
+    const noticeSafe = Number.isFinite(noticeNum) && noticeNum > 0 ? noticeNum : 0;
+
     if (interestType === 'simple') {
       const simpleInterest = effectivePrincipal * monthlyRate * totalMonths;
       const remainingInterest = (effectivePrincipal * monthlyRate / 30) * days;
       calculatedInterest = simpleInterest + remainingInterest;
 
-      const finalAmountValue = effectivePrincipal + calculatedInterest + (parseFloat(noticeCharge) || 0);
+      const finalAmountValue = effectivePrincipal + calculatedInterest + noticeSafe;
 
       newSteps.push(`💰 Simple Interest for ${totalMonths} months: ₹${simpleInterest.toLocaleString()}`);
       if (days > 0) {
         newSteps.push(`📆 Interest for remaining ${days} days: ₹${remainingInterest.toFixed(2)}`);
       }
-      if (parseFloat(noticeCharge) > 0) {
-        newSteps.push(`📋 Notice Charge: ₹${parseFloat(noticeCharge).toLocaleString()}`);
+      if (noticeSafe > 0) {
+        newSteps.push(`📋 Notice Charge: ₹${noticeSafe.toLocaleString()}`);
       }
       newSteps.push(`🎯 Total Interest: ₹${calculatedInterest.toLocaleString()}`);
       newSteps.push(`💎 Final Amount: ₹${finalAmountValue.toLocaleString()}`);
 
       setInterest(calculatedInterest.toFixed(2));
       setFinalAmount(finalAmountValue.toFixed(2));
-    } else if (interestType === 'compound') {
+    } else {
+      // compound (semi-annual compounding as per your logic)
       let remainingMonths = totalMonths;
       let remainingDays = days;
       let totalInterest = 0;
@@ -153,11 +186,11 @@ const InterestCalculator = () => {
         newSteps.push(`⏰ Interest for remaining ${remainingDays} days: ₹${remainingDaysInterest.toFixed(2)}`);
       }
 
-      const finalAmountValue = effectivePrincipal + totalInterest + (parseFloat(noticeCharge) || 0);
+      const finalAmountValue = effectivePrincipal + totalInterest + noticeSafe;
       calculatedInterest = totalInterest;
 
-      if (parseFloat(noticeCharge) > 0) {
-        newSteps.push(`📋 Notice Charge: ₹${parseFloat(noticeCharge).toLocaleString()}`);
+      if (noticeSafe > 0) {
+        newSteps.push(`📋 Notice Charge: ₹${noticeSafe.toLocaleString()}`);
       }
       newSteps.push(`🎯 Total Interest: ₹${calculatedInterest.toLocaleString()}`);
       newSteps.push(`💎 Final Amount: ₹${finalAmountValue.toLocaleString()}`);
@@ -171,10 +204,10 @@ const InterestCalculator = () => {
   }, [principal, rate, customRate, startDate, endDate, interestType, noticeCharge]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    const t = setTimeout(() => {
       calculateInterest();
     }, 300);
-    return () => clearTimeout(timer);
+    return () => clearTimeout(t);
   }, [calculateInterest]);
 
   const generatePDF = async () => {
@@ -188,6 +221,7 @@ const InterestCalculator = () => {
       const { jsPDF } = await import('jspdf');
       const doc = new jsPDF();
 
+      // Header
       doc.setFillColor(255, 193, 7);
       doc.rect(0, 0, 210, 30, 'F');
 
@@ -195,14 +229,15 @@ const InterestCalculator = () => {
       doc.setTextColor(255, 255, 255);
       doc.text('Balaji Jewellery BJR - Interest Calculator', 20, 20);
 
+      // Info
       doc.setFontSize(10);
       doc.setTextColor(100, 100, 100);
       doc.text(`Generated on: ${format(new Date(), 'dd MMM yyyy, hh:mm a')} | Balaji Jewellery BJR`, 20, 40);
 
+      // Summary box
       doc.setDrawColor(255, 193, 7);
       doc.setLineWidth(1);
       doc.rect(15, 50, 180, 80);
-
       doc.setFillColor(255, 248, 220);
       doc.rect(15, 50, 180, 80, 'F');
 
@@ -210,19 +245,18 @@ const InterestCalculator = () => {
       doc.setTextColor(0, 0, 0);
       doc.text('CALCULATION SUMMARY', 20, 60);
 
-      const start = parseDate(startDate);
-      const end = parseDate(endDate);
+      const s = parseDate(startDate)!;
+      const e = parseDate(endDate)!;
 
       doc.setFontSize(11);
       doc.text(`Principal Amount: Rs.${parseFloat(principal).toLocaleString()}`, 20, 75);
       doc.text(`Interest Rate: ${rate === 'custom' ? customRate : rate}% per month`, 20, 85);
       doc.text(`Interest Type: ${interestType === 'simple' ? 'Simple Interest' : 'Compound Interest'}`, 20, 95);
       doc.text(`Time Period: ${timePeriod}`, 20, 105);
-      if (start && end) {
-        doc.text(`Start Date: ${format(start, 'dd MMM yyyy')}`, 20, 115);
-        doc.text(`End Date: ${format(end, 'dd MMM yyyy')}`, 20, 125);
-      }
+      doc.text(`Start Date: ${format(s, 'dd MMM yyyy')}`, 20, 115);
+      doc.text(`End Date: ${format(e, 'dd MMM yyyy')}`, 20, 125);
 
+      // Results
       doc.setFillColor(34, 197, 94);
       doc.rect(15, 140, 180, 40, 'F');
 
@@ -234,44 +268,46 @@ const InterestCalculator = () => {
       doc.text(`Total Interest: Rs.${parseFloat(interest).toLocaleString()}`, 20, 170);
       doc.text(`Final Amount: Rs.${parseFloat(finalAmount).toLocaleString()}`, 100, 170);
 
+      // Steps
       if (steps.length > 0) {
         doc.setFontSize(14);
         doc.setTextColor(0, 0, 0);
         doc.text('DETAILED CALCULATION STEPS', 20, 195);
 
         doc.setFontSize(10);
-        let yPosition = 205;
-        steps.forEach((step, index) => {
-          if (yPosition > 270) {
+        let y = 205;
+        steps.forEach((step, idx) => {
+          if (y > 270) {
             doc.addPage();
-            yPosition = 20;
+            y = 20;
           }
-          const cleanStep = step.replace(/[^\w\s₹.,:()\-]/g, '').trim();
-          doc.text(`${index + 1}. ${cleanStep}`, 20, yPosition);
-          yPosition += 8;
+          const clean = step.replace(/[^\w\s₹.,:()\-]/g, '').trim();
+          doc.text(`${idx + 1}. ${clean}`, 20, y);
+          y += 8;
         });
       }
 
+      // Footer
       const pageCount = doc.internal.getNumberOfPages();
       for (let i = 1; i <= pageCount; i++) {
         doc.setPage(i);
         doc.setFontSize(8);
         doc.setTextColor(128, 128, 128);
-        doc.text(`Page ${i} of ${pageCount} | Balaji Jewellery BJR`, 20, doc.internal.pageSize.height - 10);
+        doc.text(`Page ${i} of ${pageCount} | Balaji Jewellery BJR`, 20, (doc.internal as any).pageSize.height - 10);
       }
 
       const pdfBlob = doc.output('blob');
       const pdfFile = new File([pdfBlob], `Balaji_Jewellery_Interest_${format(new Date(), 'yyyy-MM-dd')}.pdf`, { type: 'application/pdf' });
 
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+      if ((navigator as any).share && (navigator as any).canShare && (navigator as any).canShare({ files: [pdfFile] })) {
         try {
-          await navigator.share({
+          await (navigator as any).share({
             title: 'Interest Calculation - Balaji Jewellery BJR',
             text: 'Interest calculation from Balaji Jewellery BJR',
             files: [pdfFile]
           });
-        } catch (error) {
-          if ((error as Error).name !== 'AbortError') {
+        } catch (err: any) {
+          if (!err || err.name !== 'AbortError') {
             const pdfUrl = URL.createObjectURL(pdfBlob);
             const link = document.createElement('a');
             link.href = pdfUrl;
@@ -290,8 +326,8 @@ const InterestCalculator = () => {
       }
 
       setShowShareModal(true);
-    } catch (error) {
-      console.error('Error generating PDF:', error);
+    } catch (err) {
+      console.error('Error generating PDF:', err);
       alert('Failed to generate PDF. Please try again.');
     } finally {
       setIsGeneratingPDF(false);
@@ -308,6 +344,9 @@ const InterestCalculator = () => {
     try {
       const html2canvas = (await import('html2canvas')).default;
 
+      const s = parseDate(startDate)!;
+      const e = parseDate(endDate)!;
+
       const summaryElement = document.createElement('div');
       summaryElement.style.cssText = `
         background: white;
@@ -317,9 +356,6 @@ const InterestCalculator = () => {
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
       `;
-
-      const start = parseDate(startDate);
-      const end = parseDate(endDate);
 
       summaryElement.innerHTML = `
         <div style="text-align: center; margin-bottom: 25px; border-bottom: 2px solid #f59e0b; padding-bottom: 15px;">
@@ -334,7 +370,7 @@ const InterestCalculator = () => {
             <p style="margin: 5px 0; color: #374151;"><strong>Interest Rate:</strong> ${rate === 'custom' ? customRate : rate}% per month</p>
             <p style="margin: 5px 0; color: #374151;"><strong>Interest Type:</strong> ${interestType === 'simple' ? 'Simple Interest' : 'Compound Interest'}</p>
             <p style="margin: 5px 0; color: #374151;"><strong>Time Period:</strong> ${timePeriod}</p>
-            ${start && end ? `<p style="margin: 5px 0; color: #374151;"><strong>Duration:</strong> ${format(start, 'dd MMM yyyy')} to ${format(end, 'dd MMM yyyy')}</p>` : ''}
+            <p style="margin: 5px 0; color: #374151;"><strong>Duration:</strong> ${format(s, 'dd MMM yyyy')} to ${format(e, 'dd MMM yyyy')}</p>
           </div>
 
           <div style="background: #dcfce7; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
@@ -348,7 +384,7 @@ const InterestCalculator = () => {
             <h3 style="color: #374151; margin-bottom: 15px; font-size: 16px; font-weight: bold;">CALCULATION STEPS</h3>
             <div style="background: #f9fafb; padding: 15px; border-radius: 8px; font-size: 12px;">
               ${steps.map((step, index) => {
-                const cleanStep = step.replace(/[^\w\s₹.,:()\-]/g, '').replace(/₹/g, 'Rs.').trim();
+                const cleanStep = step.replace(/[^\w\\s₹.,:()\\-]/g, '').replace(/₹/g, 'Rs.').trim();
                 return `<p style="margin: 3px 0; color: #374151;">${index + 1}. ${cleanStep}</p>`;
               }).join('')}
             </div>
@@ -376,15 +412,15 @@ const InterestCalculator = () => {
         if (blob) {
           const imageFile = new File([blob], `Balaji_Jewellery_Interest_${format(new Date(), 'yyyy-MM-dd')}.png`, { type: 'image/png' });
 
-          if (navigator.share && navigator.canShare && navigator.canShare({ files: [imageFile] })) {
+          if ((navigator as any).share && (navigator as any).canShare && (navigator as any).canShare({ files: [imageFile] })) {
             try {
-              await navigator.share({
+              await (navigator as any).share({
                 title: 'Interest Calculation - Balaji Jewellery BJR',
                 text: 'Interest calculation from Balaji Jewellery BJR',
                 files: [imageFile]
               });
-            } catch (error) {
-              if ((error as Error).name !== 'AbortError') {
+            } catch (err: any) {
+              if (!err || err.name !== 'AbortError') {
                 const link = document.createElement('a');
                 link.download = `Balaji_Jewellery_Interest_${format(new Date(), 'yyyy-MM-dd')}.png`;
                 link.href = canvas.toDataURL();
@@ -401,8 +437,8 @@ const InterestCalculator = () => {
       }, 'image/png');
 
       setShowShareModal(true);
-    } catch (error) {
-      console.error('Error generating image:', error);
+    } catch (err) {
+      console.error('Error generating image:', err);
       alert('Failed to generate image. Please try again.');
     } finally {
       setIsGeneratingImage(false);
@@ -410,15 +446,18 @@ const InterestCalculator = () => {
   };
 
   const getShareText = () => {
-    const start = parseDate(startDate);
-    const end = parseDate(endDate);
+    const s = parseDate(startDate);
+    const e = parseDate(endDate);
+    const startTxt = s ? format(s, 'dd MMM yyyy') : startDate;
+    const endTxt = e ? format(e, 'dd MMM yyyy') : endDate;
 
-    const baseText = `💎 *Balaji Jewellery BJR - Interest Calculation*\n\n` +
-      `📊 *Principal:* Rs.${parseFloat(principal).toLocaleString()}\n` +
+    const baseText =
+      `💎 *Balaji Jewellery BJR - Interest Calculation*\n\n` +
+      `📊 *Principal:* Rs.${parseFloat(principal || '0').toLocaleString()}\n` +
       `📈 *Interest Rate:* ${rate === 'custom' ? customRate : rate}% per month\n` +
       `⚙️ *Interest Type:* ${interestType === 'simple' ? 'Simple' : 'Compound'}\n` +
       `⏰ *Time Period:* ${timePeriod}\n` +
-      (start && end ? `📅 *Duration:* ${format(start, 'dd MMM yyyy')} to ${format(end, 'dd MMM yyyy')}\n\n` : '\n') +
+      `📅 *Duration:* ${startTxt} to ${endTxt}\n\n` +
       `💰 *Total Interest:* Rs.${parseFloat(interest || '0').toLocaleString()}\n` +
       `💎 *Final Amount:* Rs.${parseFloat(finalAmount || '0').toLocaleString()}`;
 
@@ -429,7 +468,6 @@ const InterestCalculator = () => {
       }).join('\n');
       return baseText + '\n\n📝 *Calculation Steps:*\n' + cleanSteps;
     }
-
     return baseText;
   };
 
@@ -468,15 +506,50 @@ const InterestCalculator = () => {
     setFinalAmount(null);
     setTimePeriod('');
     setSteps([]);
+    setError(null);
   };
 
-  const handleDateChange = (value: string, setter: (value: string) => void) => {
-    setter(value);
+  // Helpers for date input that supports typing + native picker
+  const DateInput: React.FC<{
+    label: string;
+    value: string;
+    onChange: (v: string) => void;
+    hint?: string;
+  }> = ({ label, value, onChange, hint }) => {
+    return (
+      <div className="group">
+        <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+          <Calendar className="w-4 h-4 mr-1" />
+          {label}
+          {hint && (
+            <div className="ml-1 group relative">
+              <Info className="w-3 h-3 text-gray-400 cursor-help" />
+              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
+                {hint}
+              </div>
+            </div>
+          )}
+        </label>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={(e) => (e.currentTarget.type = 'date')}
+          onBlur={(e) => {
+            if (!e.currentTarget.value) e.currentTarget.type = 'text';
+          }}
+          className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-colors text-sm sm:text-base"
+          placeholder="dd-mm-yyyy or dd/mm/yyyy"
+        />
+        <p className="text-xs text-gray-500 mt-1">Format: dd-mm-yyyy or dd/mm/yyyy</p>
+      </div>
+    );
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-yellow-50 to-orange-50">
       <div className="container mx-auto px-2 sm:px-4 lg:px-6 py-4 sm:py-6 lg:py-8">
+        {/* Header */}
         <div className="text-center mb-6 sm:mb-8">
           <div className="flex justify-center items-center mb-4">
             <Calculator className="w-8 h-8 sm:w-10 lg:w-12 sm:h-10 lg:h-12 text-amber-600 mr-2 sm:mr-3" />
@@ -503,6 +576,7 @@ const InterestCalculator = () => {
         </div>
 
         <div className="grid lg:grid-cols-2 gap-4 sm:gap-6 lg:gap-8">
+          {/* Input Form */}
           <div className="bg-white rounded-xl sm:rounded-2xl shadow-xl p-4 sm:p-6 lg:p-8 border border-amber-100">
             <h2 className="text-xl sm:text-2xl font-semibold text-gray-800 mb-4 sm:mb-6 flex items-center">
               <DollarSign className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600 mr-2" />
@@ -510,6 +584,7 @@ const InterestCalculator = () => {
             </h2>
 
             <div className="space-y-4 sm:space-y-6">
+              {/* Principal Amount */}
               <div className="group">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Principal Amount (₹) *
@@ -523,6 +598,7 @@ const InterestCalculator = () => {
                 />
               </div>
 
+              {/* Interest Rate */}
               <div className="group">
                 <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
                   <Percent className="w-4 h-4 mr-1" />
@@ -551,6 +627,7 @@ const InterestCalculator = () => {
                 )}
               </div>
 
+              {/* Notice Charge */}
               <div className="group">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Notice Charge (₹)
@@ -564,55 +641,22 @@ const InterestCalculator = () => {
                 />
               </div>
 
+              {/* Date Range (manual typing + picker on focus) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                    <Calendar className="w-4 h-4 mr-1" />
-                    Start Date *
-                  </label>
-                  <input
-                    type="text"
-                    value={startDate}
-                    onChange={(e) => handleDateChange(e.target.value, setStartDate)}
-                    onFocus={(e) => e.target.type = 'date'}
-                    onBlur={(e) => {
-                      if (!e.target.value) {
-                        e.target.type = 'text';
-                      }
-                    }}
-                    className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-colors text-sm sm:text-base"
-                    placeholder="dd-mm-yyyy or dd/mm/yyyy"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Format: dd-mm-yyyy or dd/mm/yyyy</p>
-                </div>
-                <div className="group">
-                  <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
-                    <Calendar className="w-4 h-4 mr-1" />
-                    End Date
-                    <div className="ml-1 group relative">
-                      <Info className="w-3 h-3 text-gray-400 cursor-help" />
-                      <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                        Defaults to today
-                      </div>
-                    </div>
-                  </label>
-                  <input
-                    type="text"
-                    value={endDate}
-                    onChange={(e) => handleDateChange(e.target.value, setEndDate)}
-                    onFocus={(e) => e.target.type = 'date'}
-                    onBlur={(e) => {
-                      if (!e.target.value) {
-                        e.target.type = 'text';
-                      }
-                    }}
-                    className="w-full px-3 sm:px-4 py-2 sm:py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 transition-colors text-sm sm:text-base"
-                    placeholder="dd-mm-yyyy or dd/mm/yyyy"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Format: dd-mm-yyyy or dd/mm/yyyy</p>
-                </div>
+                <DateInput
+                  label="Start Date *"
+                  value={startDate}
+                  onChange={setStartDate}
+                />
+                <DateInput
+                  label="End Date"
+                  value={endDate}
+                  onChange={setEndDate}
+                  hint="Defaults to today"
+                />
               </div>
 
+              {/* Interest Type */}
               <div className="group">
                 <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
                   <TrendingUp className="w-4 h-4 mr-1" />
@@ -624,7 +668,7 @@ const InterestCalculator = () => {
                       type="radio"
                       value="simple"
                       checked={interestType === 'simple'}
-                      onChange={(e) => setInterestType(e.target.value)}
+                      onChange={(e) => setInterestType(e.target.value as 'simple')}
                       className="mr-2 text-amber-600 focus:ring-amber-500"
                     />
                     <span className="text-sm sm:text-base">Simple Interest</span>
@@ -634,7 +678,7 @@ const InterestCalculator = () => {
                       type="radio"
                       value="compound"
                       checked={interestType === 'compound'}
-                      onChange={(e) => setInterestType(e.target.value)}
+                      onChange={(e) => setInterestType(e.target.value as 'compound')}
                       className="mr-2 text-amber-600 focus:ring-amber-500"
                     />
                     <span className="text-sm sm:text-base">Compound Interest</span>
@@ -642,6 +686,7 @@ const InterestCalculator = () => {
                 </div>
               </div>
 
+              {/* Reset Button */}
               <button
                 onClick={resetForm}
                 className="w-full bg-gray-500 text-white px-4 py-2 sm:py-3 rounded-lg font-medium hover:bg-gray-600 transition-colors text-sm sm:text-base"
@@ -651,11 +696,18 @@ const InterestCalculator = () => {
             </div>
           </div>
 
+          {/* Results */}
           <div className="bg-white rounded-xl sm:rounded-2xl shadow-xl p-4 sm:p-6 lg:p-8 border border-amber-100">
             <h2 className="text-xl sm:text-2xl font-semibold text-gray-800 mb-4 sm:mb-6 flex items-center">
               <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600 mr-2" />
               Calculation Results
             </h2>
+
+            {error && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {error}
+              </div>
+            )}
 
             {isCalculating ? (
               <div className="flex justify-center items-center h-32">
@@ -663,6 +715,7 @@ const InterestCalculator = () => {
               </div>
             ) : interest && finalAmount ? (
               <div className="space-y-4 sm:space-y-6">
+                {/* Summary Cards */}
                 <div id="calculation-summary" className="grid grid-cols-1 gap-3 sm:gap-4">
                   <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-4 sm:p-6 rounded-xl border border-green-200">
                     <div className="flex justify-between items-center">
@@ -684,6 +737,7 @@ const InterestCalculator = () => {
                   </div>
                 </div>
 
+                {/* Action Buttons */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
                   <button
                     onClick={generatePDF}
@@ -705,7 +759,7 @@ const InterestCalculator = () => {
                     {isGeneratingImage ? (
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                     ) : (
-                      <Image className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
+                      <ImageIcon className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
                     )}
                     Image
                   </button>
@@ -725,6 +779,7 @@ const InterestCalculator = () => {
                   </button>
                 </div>
 
+                {/* Calculation Steps */}
                 {steps.length > 0 && (
                   <div className="mt-6 sm:mt-8">
                     <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-3 sm:mb-4 flex items-center">
@@ -755,6 +810,7 @@ const InterestCalculator = () => {
           </div>
         </div>
 
+        {/* Share Modal */}
         {showShareModal && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-xl sm:rounded-2xl p-4 sm:p-6 lg:p-8 max-w-md w-full mx-4">
@@ -762,7 +818,9 @@ const InterestCalculator = () => {
                 <Share2 className="w-5 h-5 sm:w-6 sm:h-6 text-amber-600 mr-2" />
                 Share Results
               </h3>
-              <p className="text-gray-600 mb-4 sm:mb-6 text-sm sm:text-base">Choose how you'd like to share your calculation:</p>
+              <p className="text-gray-600 mb-4 sm:mb-6 text-sm sm:text-base">
+                Choose how you'd like to share your calculation:
+              </p>
               <div className="space-y-2 sm:space-y-3">
                 <button
                   onClick={shareViaWhatsApp}
